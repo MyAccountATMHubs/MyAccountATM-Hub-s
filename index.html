@@ -29,7 +29,7 @@
         html[data-theme="light"] { --bg:#f4f3f1; --card:#ffffff; --line:#e2e0de; --text:#262527; --muted:#6a676b; --heading:#1d1c1e; --brand-text:#2f6b35; --ok:#2f7a37; --wait:#a16207; --off:#6b6870; color-scheme: light; }
         body { font-family:'Inter','Vazirmatn',sans-serif; line-height:1.55; -webkit-font-smoothing:antialiased; font-variant-numeric:tabular-nums; -webkit-tap-highlight-color:transparent; padding-bottom:calc(6rem + env(safe-area-inset-bottom)); }
         html[data-theme] body.bg-slate-900 { background:var(--bg); color:var(--text); }
-        body > header { padding-top:max(.75rem,env(safe-area-inset-top)); background:color-mix(in srgb,var(--bg) 90%,transparent); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-bottom:0; box-shadow:none; }
+        body > header { padding-top:max(.75rem,env(safe-area-inset-top)); background:var(--bg); backdrop-filter:none; -webkit-backdrop-filter:none; border-bottom:0; box-shadow:none; }
         .flag-bar { position:relative; height:21px; margin:10px -16px -12px; background:linear-gradient(#ed1c24 0 33.34%,#fff 33.34% 66.67%,#278e43 66.67%); }
         .lang-chip { width:100%; min-height:40px; padding:.5rem .75rem; border-radius:10px; font-size:13px; font-weight:600; border:1px solid var(--line); color:var(--text); background:transparent; }
         .lang-chip[aria-pressed="true"] { background:var(--brand); color:#fff; border-color:var(--brand-hi); }
@@ -53,11 +53,11 @@
         #loc-off-btn.sel { background:#b45309 !important; color:#fff !important; border-color:#f59e0b !important; box-shadow:0 0 0 3px rgba(245,158,11,.28); }
         #bank-btn.bank-on, #gov-btn.bank-on { background:var(--brand) !important; color:#fff !important; border-color:var(--brand-hi) !important; }
         /* settings page */
-        .spage { position:fixed; inset:0; z-index:1200; background:var(--bg); color:var(--text); display:flex; flex-direction:column; transform:translateX(24px); opacity:0; visibility:hidden; transition:transform .22s ease, opacity .22s ease, visibility 0s linear .22s; }
+        .spage { position:fixed; inset:0; z-index:1200; background:var(--bg); color:var(--text); display:flex; flex-direction:column; transform:translateX(24px); opacity:0; visibility:hidden; transition:transform .55s cubic-bezier(.22,.8,.3,1), opacity .5s ease, visibility 0s linear .55s; }
         html[dir="rtl"] .spage:not(.open) { transform:translateX(-24px); }
         .spage, .spage * { box-sizing:border-box; }
         .sgroup-ico svg, .stheme-ico svg { width:1em; height:1em; }
-        .spage.open { transform:none; opacity:1; visibility:visible; transition:transform .22s ease, opacity .22s ease; }
+        .spage.open { transform:none; opacity:1; visibility:visible; transition:transform .55s cubic-bezier(.22,.8,.3,1), opacity .5s ease; }
         .spage-bar { display:flex; align-items:center; gap:.75rem; padding:max(.75rem,env(safe-area-inset-top)) 1rem .75rem; border-bottom:1px solid var(--line); background:var(--card); }
         .spage-back { width:40px; height:40px; border-radius:12px; border:1px solid var(--line); background:transparent; color:var(--text); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
         .spage-back svg { width:22px; height:22px; }
@@ -83,6 +83,15 @@
         .stheme[data-theme-opt="dark"] .stheme-ico { color:#a5b4fc; }
         .stheme[data-theme-opt="light"] .stheme-ico { color:#f59e0b; }
         .stheme[aria-pressed="true"] { border-color:var(--brand-hi); box-shadow:0 0 0 3px rgba(69,140,75,.25); }
+        /* slow-motion modals */
+        @keyframes m-fade-in { from { opacity:0; } to { opacity:1; } }
+        @keyframes m-sheet-in { from { transform:translateY(60px); opacity:0; } to { transform:none; opacity:1; } }
+        @keyframes m-fade-out { from { opacity:1; } to { opacity:0; } }
+        @keyframes m-sheet-out { from { transform:none; opacity:1; } to { transform:translateY(60px); opacity:0; } }
+        #gov-modal.flex, #bank-modal.flex { animation:m-fade-in .5s ease both; }
+        #gov-modal.flex > div, #bank-modal.flex > div { animation:m-sheet-in .6s cubic-bezier(.22,.8,.3,1) both; }
+        #gov-modal.flex.closing, #bank-modal.flex.closing { animation:m-fade-out .4s ease both; }
+        #gov-modal.flex.closing > div, #bank-modal.flex.closing > div { animation:m-sheet-out .4s ease both; }
         /* tap animation (slow, soft) */
         @keyframes icon-pop { 0% { scale:1; rotate:0deg; } 30% { scale:.68; rotate:-10deg; } 65% { scale:1.25; rotate:6deg; } 100% { scale:1; rotate:0deg; } }
         @keyframes btn-press { 0% { scale:1; } 35% { scale:.92; } 70% { scale:1.04; } 100% { scale:1; } }
@@ -944,13 +953,15 @@
         }
         function openBanks() {
             renderBankList();
-            const m = $('bank-modal'); m.classList.remove('hidden'); m.classList.add('flex');
+            const m = $('bank-modal'); m.classList.remove('hidden', 'closing'); m.classList.add('flex');
             document.body.style.overflow = 'hidden';
         }
         function closeBanks(e) {
             if (e && e.target !== $('bank-modal')) return;
-            const m = $('bank-modal'); m.classList.add('hidden'); m.classList.remove('flex');
-            document.body.style.overflow = '';
+            const m = $('bank-modal'); document.body.style.overflow = '';
+            if (!m.classList.contains('flex') || m.classList.contains('closing')) return;
+            m.classList.add('closing');
+            setTimeout(() => { m.classList.add('hidden'); m.classList.remove('flex', 'closing'); }, 400);
         }
         function selectBank(code) {
             selectedBank = code;
@@ -977,13 +988,15 @@
         }
         function openGov() {
             renderGovList();
-            const m = $('gov-modal'); m.classList.remove('hidden'); m.classList.add('flex');
+            const m = $('gov-modal'); m.classList.remove('hidden', 'closing'); m.classList.add('flex');
             document.body.style.overflow = 'hidden';
         }
         function closeGov(e) {
             if (e && e.target !== $('gov-modal')) return;
-            const m = $('gov-modal'); m.classList.add('hidden'); m.classList.remove('flex');
-            document.body.style.overflow = '';
+            const m = $('gov-modal'); document.body.style.overflow = '';
+            if (!m.classList.contains('flex') || m.classList.contains('closing')) return;
+            m.classList.add('closing');
+            setTimeout(() => { m.classList.add('hidden'); m.classList.remove('flex', 'closing'); }, 400);
         }
         function selectGov(code) {
             selectedGov = code;
