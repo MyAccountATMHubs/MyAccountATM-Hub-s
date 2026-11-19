@@ -1296,7 +1296,7 @@
   const BASE_HUBS = hubsData.slice();
   const BASE_INFO = BANK_INFO.map(b => ({ ...b }));
   const BASE_NAMES = { ...BANK_NAMES };
-  let remote = { hubs: {}, banks: {} }, lastApplied = false, admDirty = false;
+  let remote = { hubs: {}, banks: {} }, lastApplied = false, admDirty = false, pullErr = 0;
   const GOVS = { Erbil: 'هەولێر', Duhok: 'دهۆک', Suli: 'سلێمانی' };
   const STATUSES = ['Active', 'Pending', 'Deployed', 'Not-Deployed'];
   const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1320,13 +1320,14 @@
       if (v.deleted) m.delete(id);
       else if (v.name && isFinite(Number(v.lat)) && isFinite(Number(v.lon))) m.set(id, cleanHub(id, v));
     });
-    hubsData = [...m.values()].sort((a, b) => a.id - b.id);
+    const gone = new Set(Object.entries(remote.banks || {}).filter(([, v]) => v && v.deleted).map(([c]) => c));
+    hubsData = [...m.values()].map(h => gone.size && h.banks.some(b => gone.has(b)) ? { ...h, banks: h.banks.filter(b => !gone.has(b)) } : h).sort((a, b) => a.id - b.id);
     const bi = new Map(BASE_INFO.map(b => [b.code, b]));
     Object.keys(BANK_NAMES).forEach(k => delete BANK_NAMES[k]);
     Object.assign(BANK_NAMES, BASE_NAMES);
     Object.entries(remote.banks || {}).forEach(([code, v]) => {
       if (!v) return;
-      if (v.deleted) { bi.delete(code); return; }
+      if (v.deleted) { bi.delete(code); delete BANK_NAMES[code]; return; }
       if (v.name) BANK_NAMES[code] = esc(v.name);
       bi.set(code, {
         code,
@@ -1343,7 +1344,8 @@
     if (!ON) return;
     try {
       const r = await fetch(DB + '/.json', { cache: 'no-store' });
-      if (!r.ok) throw 0;
+      if (!r.ok) { pullErr = r.status; throw 0; }
+      pullErr = 0;
       const j = (await r.json()) || {};
       const nr = { hubs: j.hubs || {}, banks: j.banks || {} };
       if (JSON.stringify(nr) === JSON.stringify(remote) && lastApplied) return;
@@ -1362,9 +1364,15 @@
 
   /* ---------- admin auth ---------- */
   let sess = null; try { sess = JSON.parse(ls.get('adm1') || 'null'); } catch (e) {}
+  const FB = { EMAIL_NOT_FOUND: 'ئەم ئیمەیڵە لە Firebase > Authentication > Users تۆمار نەکراوە', INVALID_PASSWORD: 'وشەی نهێنی هەڵەیە', INVALID_LOGIN_CREDENTIALS: 'ئیمەیڵ یان وشەی نهێنی هەڵەیە', USER_DISABLED: 'ئەم هەژمارە ناچالاک کراوە', OPERATION_NOT_ALLOWED: 'Email/Password لە Firebase > Authentication > Sign-in method چالاک نەکراوە', PASSWORD_LOGIN_DISABLED: 'Email/Password لە Firebase > Authentication > Sign-in method چالاک نەکراوە', TOO_MANY_ATTEMPTS_TRY_LATER: 'زۆر هەوڵت دا، کەمێک چاوەڕێ بکە' };
+  const NET = 'ئینتەرنێت نییە یان Firebase دەستی پێ ناگات';
   async function signIn(email, pass) {
-    const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${CLOUD.apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pass, returnSecureToken: true }) });
-    const j = await r.json(); if (!r.ok) { const m = (j.error && j.error.message) || ''; throw new Error(/API_KEY|API key/i.test(m) ? 'apiKey هەڵەیە (' + m + ')' : 'ئیمەیڵ یان وشەی نهێنی هەڵەیە (' + m + ')'); }
+    let r, j;
+    try {
+      r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${CLOUD.apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pass, returnSecureToken: true }) });
+      j = await r.json();
+    } catch (e) { throw new Error(NET); }
+    if (!r.ok) { const m = (j.error && j.error.message) || ''; throw new Error(/API.?KEY/i.test(m) ? 'apiKey هەڵەیە' : (FB[m.split(/[\s:]/)[0]] || m || 'هەڵە ' + r.status)); }
     sess = { idToken: j.idToken, refresh: j.refreshToken, exp: Date.now() + (Number(j.expiresIn) - 60) * 1000, email };
     ls.set('adm1', JSON.stringify(sess));
   }
@@ -1378,13 +1386,20 @@
   }
   async function write(path, data) {
     const t = await token();
-    const r = await fetch(`${DB}/${path}.json?auth=${t}`, { method: data === null ? 'DELETE' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: data === null ? undefined : JSON.stringify(data) });
-    if (!r.ok) throw new Error('نەتوانرا پاشەکەوت بکرێت (مۆڵەتت نییە؟)');
+    let r;
+    try { r = await fetch(`${DB}/${path}.json?auth=${t}`, { method: data === null ? 'DELETE' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: data === null ? undefined : JSON.stringify(data) }); }
+    catch (e) { throw new Error(NET); }
+    if (!r.ok) {
+      let m = ''; try { m = (await r.json()).error || ''; } catch (e) {}
+      if (r.status === 401 || r.status === 403 || /permission/i.test(m)) throw new Error('Permission denied: لە Firebase > Realtime Database > Rules ڕێگەی نووسین بدە بە ئەدمین (.write: auth != null)');
+      if (r.status === 404) throw new Error('dbUrl هەڵەیە یان Realtime Database دروست نەکراوە (404)');
+      throw new Error('نەتوانرا پاشەکەوت بکرێت (' + r.status + (m ? ': ' + m : '') + ')');
+    }
     await pull();
   }
 
   /* ---------- admin UI ---------- */
-  let admOpen = false, tab = 'hubs', editing = null, msg = '';
+  let admOpen = false, tab = 'hubs', editing = null, msg = '', admQ = '', admGov = '';
   const css = document.createElement('style');
   css.textContent = `
   #adm{position:fixed;inset:0;z-index:2000;background:var(--bg);color:var(--text);overflow:auto;display:none;direction:rtl;font-family:'Vazirmatn','Inter',sans-serif;padding:max(1rem,env(safe-area-inset-top)) 1rem 4rem}
@@ -1404,7 +1419,7 @@
   #adm small{color:var(--muted)}`;
   document.head.appendChild(css);
   const root = document.createElement('div'); root.id = 'adm'; document.body.appendChild(root);
-  root.addEventListener('input', () => { admDirty = true; });
+  root.addEventListener('input', (e) => { if (e.target.id !== 'a-q') admDirty = true; });
 
   window.openAdmin = function () { admOpen = true; editing = null; msg = ''; root.classList.add('open'); document.body.style.overflow = 'hidden'; admRender(); };
   window.closeAdmin = function () { admOpen = false; root.classList.remove('open'); document.body.style.overflow = ''; };
@@ -1413,30 +1428,42 @@
     admDirty = false;
     if (!ON) { root.innerHTML = `<div class="w">${hdr}<div class="card">سێرڤەر ڕێکنەخراوە. فایلی <b>SETUP.md</b> بخوێنەوە و <b>dbUrl</b> و <b>apiKey</b> لە کۆتایی فایلی index.html دابنێ.</div></div>`; return; }
     if (!sess) { root.innerHTML = `<div class="w">${hdr}<div class="card"><label>Email</label><input id="a-em" type="email" autocomplete="username"><label>وشەی نهێنی</label><input id="a-pw" type="password" autocomplete="current-password"><div class="row"><span class="msg" id="a-msg" style="display:none"></span><button class="btn" onclick="admLogin()">چوونەژوورەوە</button></div></div></div>`; return; }
-    const m = msg ? `<div class="msg">${esc(msg)}</div>` : '';
+    const m = (pullErr ? `<div class="msg" style="background:color-mix(in srgb,var(--red) 30%,transparent)">خوێندنەوەی داتا لە Firebase سەرکەوتوو نەبوو (${pullErr}) — لە Rules دا .read: true دابنێ</div>` : '') + (msg ? `<div class="msg">${esc(msg)}</div>` : '');
     root.innerHTML = `<div class="w">${hdr}<div class="row"><small dir="ltr">${esc(sess.email)}</small><button class="btn g" onclick="admLogout()">چوونەدەرەوە</button></div>
+      <div class="card"><small>داتای ناو فایلەکە (${BASE_HUBS.length} هاب · ${BASE_INFO.length} بانک) بنێرە بۆ Firebase تا لەوێ بپارێزرێت و هەموویان دەسکاری بکرێن. دەسکارییەکانی پێشووت ناسڕدرێنەوە.</small><div class="row"><button class="btn" onclick="admSeed()">ناردنی هەموو داتا بۆ Firebase</button></div></div>
       <div class="tabs"><button class="btn ${tab === 'hubs' ? 'on' : ''}" onclick="admTab('hubs')">هابەکان</button><button class="btn ${tab === 'banks' ? 'on' : ''}" onclick="admTab('banks')">بانک و ژمارەکان</button></div>${m}
       ${tab === 'hubs' ? hubsView() : banksView()}</div>`;
   }
   const f = (id, label, v, extra = '') => `<div><label>${label}</label><input id="${id}" value="${esc(v)}" ${extra}></div>`;
+  const LOCS = { 'City Center': 'ناوەندی شار (City Center)', 'Remote': 'دوور لە ناوەند (Remote)' };
+  function hubList() {
+    const q = admQ.trim().toLowerCase();
+    const all = hubsData.slice().sort((a, b) => b.id - a.id);
+    const hit = all.filter(h => (!admGov || h.gov === admGov) && (!q || [h.id, h.name, h.city, ...h.banks].join(' ').toLowerCase().includes(q)));
+    const rows = hit.slice(0, 80).map(h => `<div class="card"><div class="row"><div><b dir="auto">${h.name}</b><br><small>#${h.id} · ${GOVS[h.gov] || h.gov} · ${h.city} · ${h.loc} · ${h.banks.join(', ')}</small></div><div style="display:flex;gap:.3rem"><button class="btn g" onclick="admEditHub(${h.id})">✎</button><button class="btn d" onclick="admDelHub(${h.id})">🗑</button></div></div></div>`).join('');
+    return `<small>${hit.length} / ${all.length}${hit.length > 80 ? ' — ٨٠ی یەکەم نیشان دراوە، گەڕان بەکاربهێنە' : ''}</small>` + rows;
+  }
   function hubsView() {
     const e = editing && editing.type === 'hub' ? editing.data : null;
     const nextId = Math.max(0, ...hubsData.map(h => h.id), ...Object.keys(remote.hubs).map(Number)) + 1;
-    const form = `<div class="card"><b>${e ? 'دەستکاریکردنی هاب #' + e.id : 'زیادکردنی هابی نوێ'}</b>
+    const form = `<div class="card"><b>${e ? 'دەستکاریکردنی هاب #' + e.id : 'زیادکردنی هابی نوێ'}</b><div class="msg" id="adm-err" style="display:none"></div>
       <div class="g2">${f('h-id', 'Hub ID', e ? e.id : nextId, e ? 'disabled' : 'type="number"')}${f('h-name', 'ناو', e ? e.name : '')}</div>
-      <div class="g2"><div><label>پارێزگا</label><select id="h-gov">${Object.entries(GOVS).map(([k, v]) => `<option value="${k}" ${e && e.gov === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>${f('h-city', 'شار', e ? e.city : '')}</div>
-      <div class="g2">${f('h-lat', 'Latitude', e ? e.lat : '', 'inputmode="decimal"')}${f('h-lon', 'Longitude', e ? e.lon : '', 'inputmode="decimal"')}</div>
+      <div class="g2"><div><label>پارێزگا</label><select id="h-gov">${Object.entries(GOVS).map(([k, t]) => `<option value="${k}" ${e && e.gov === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>${f('h-city', 'شار', e ? e.city : '')}</div>
+      <div class="g2">${f('h-lat', 'Latitude (یان «lat, lon»)', e ? e.lat : '', 'inputmode="decimal"')}${f('h-lon', 'Longitude', e ? e.lon : '', 'inputmode="decimal"')}</div>
       <div class="g2">${f('h-atm', 'ژمارەی ATM', e ? e.atm : 1, 'type="number"')}<div><label>دۆخ</label><select id="h-st">${STATUSES.map(s => `<option ${e && e.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div></div>
+      <label>شوێن</label><select id="h-loc">${Object.entries(LOCS).map(([k, t]) => `<option value="${k}" ${(e ? e.loc : 'City Center') === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
       ${f('h-banks', 'بانکەکان (کۆد بە کۆما، وەک NBI, CIB)', e ? vals(e.banks).join(', ') : '')}
       <small>کۆدی بانکەکان: ${BANK_INFO.map(b => b.code).join(' · ')}</small>
       ${f('h-link', 'لینکی نەخشە (ئارەزوومەندانە)', e ? (e.link || '') : '')}
       <div class="row"><button class="btn g" onclick="admCancel()">پاکردنەوە</button><button class="btn" onclick="admSaveHub()">پاشەکەوتکردن</button></div></div>`;
-    const list = hubsData.slice().sort((a, b) => b.id - a.id).map(h => `<div class="card"><div class="row"><div><b dir="auto">${h.name}</b><br><small>#${h.id} · ${h.city} · ${h.banks.join(', ')}</small></div><div style="display:flex;gap:.3rem"><button class="btn g" onclick="admEditHub(${h.id})">✎</button><button class="btn d" onclick="admDelHub(${h.id})">🗑</button></div></div></div>`).join('');
-    return form + `<h2 style="margin-top:1rem">هابەکان (${hubsData.length})</h2>` + list;
+    return form + `<h2 style="margin-top:1rem">هابەکان (${hubsData.length})</h2>
+      <input id="a-q" type="search" placeholder="گەڕان: ناو، شار، ID، بانک…" value="${esc(admQ)}" oninput="admSearch(this.value)" style="margin:.4rem 0">
+      <select onchange="admGovF(this.value)"><option value="">هەموو پارێزگاکان</option>${Object.entries(GOVS).map(([k, t]) => `<option value="${k}" ${admGov === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <div id="adm-list">${hubList()}</div>`;
   }
   function banksView() {
     const e = editing && editing.type === 'bank' ? editing.data : null;
-    const form = `<div class="card"><b>${e ? 'دەستکاریکردنی بانک ' + e.code : 'زیادکردنی بانک / ژمارە'}</b>
+    const form = `<div class="card"><b>${e ? 'دەستکاریکردنی بانک ' + e.code : 'زیادکردنی بانک / ژمارە'}</b><div class="msg" id="adm-err" style="display:none"></div>
       <div class="g2">${f('b-code', 'کۆد (وەک NBI)', e ? e.code : '', e ? 'disabled' : '')}${f('b-name', 'ناوی بانک', e ? (BANK_NAMES[e.code] || '') : '')}</div>
       <label>ژمارە مۆبایل/تەلەفۆنەکان (هەر ژمارەیەک لە دێڕێک)</label><textarea id="b-ph">${esc(e ? e.phones.map(p => p.t).join('\n') : '')}</textarea>
       <label>ئیمەیڵەکان (هەر یەکە لە دێڕێک)</label><textarea id="b-em">${esc(e ? e.emails.join('\n') : '')}</textarea>
@@ -1452,23 +1479,43 @@
   window.admCancel = () => { editing = null; admRender(); };
   window.admLogin = async () => { const m = document.getElementById('a-msg'); try { await signIn(v('a-em').trim(), v('a-pw')); msg = ''; admRender(); } catch (e) { m.style.display = 'block'; m.textContent = e.message; } };
   window.admLogout = () => { sess = null; ls.del('adm1'); admRender(); };
-  window.admEditHub = (id) => { const raw = remote.hubs[id] && !remote.hubs[id].deleted ? { id, ...remote.hubs[id] } : BASE_HUBS.find(h => h.id === id); editing = { type: 'hub', data: { ...raw, id } }; admRender(); root.scrollTop = 0; };
+  window.admEditHub = (id) => {
+    const r0 = remote.hubs[id], raw = r0 && !r0.deleted && r0.name ? { id, ...r0 } : BASE_HUBS.find(h => h.id === id);
+    const gone = (c) => remote.banks[c] && remote.banks[c].deleted;
+    editing = { type: 'hub', data: { ...raw, id, banks: vals(raw.banks).filter(c => !gone(c)) } }; admRender(); root.scrollTop = 0;
+  };
+  window.admSeed = () => {
+    if (!confirm('هەموو ' + BASE_HUBS.length + ' هاب و ' + BASE_INFO.length + ' بانک دەنێردرێن بۆ Firebase. بەردەوام بیت؟')) return;
+    const hubs = {}, banks = {};
+    BASE_HUBS.forEach(h => { const { id, ...r } = h; hubs[id] = r; });
+    Object.entries(remote.hubs || {}).forEach(([k, x]) => { if (x) hubs[k] = x; });
+    BASE_INFO.forEach(b => { banks[b.code] = { name: BASE_NAMES[b.code] || b.code, phones: b.phones.map(p => p.t), emails: b.emails, map: b.map === '#' ? '' : b.map }; });
+    Object.entries(remote.banks || {}).forEach(([k, x]) => { if (x) banks[k] = x; });
+    run(async () => { await write('hubs', hubs); await write('banks', banks); }, 'هەموو داتاکان نێردران بۆ Firebase ✓');
+  };
+  window.admSearch = (q) => { admQ = q; const l = document.getElementById('adm-list'); if (l) l.innerHTML = hubList(); };
+  window.admGovF = (g) => { admGov = g; const l = document.getElementById('adm-list'); if (l) l.innerHTML = hubList(); };
+  const warn = (t) => { const b = document.getElementById('adm-err'); if (b) { b.textContent = t; b.style.display = 'block'; b.scrollIntoView({ block: 'center' }); } else { msg = t; admRender(); } };
   window.admEditBank = (c) => { editing = { type: 'bank', data: BANK_INFO.find(b => b.code === c) }; admRender(); root.scrollTop = 0; };
   window.admSaveHub = () => {
-    const id = Number(v('h-id')), lat = Number(v('h-lat')), lon = Number(v('h-lon')), name = v('h-name').trim();
-    if (!id || !name || !v('h-lat') || !v('h-lon') || !isFinite(lat) || !isFinite(lon)) { msg = 'ناو و Latitude و Longitude پێویستن'; return admRender(); }
+    const id = Number(v('h-id')), name = v('h-name').trim();
+    let latS = v('h-lat').trim(), lonS = v('h-lon').trim();
+    const mm = latS.match(/^(-?\d+(?:\.\d+)?)\s*[,،]\s*(-?\d+(?:\.\d+)?)$/);
+    if (mm) { latS = mm[1]; lonS = mm[2]; }
+    const lat = Number(latS), lon = Number(lonS);
+    if (!id || !name || !latS || !lonS || !isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return warn('ناو و Latitude و Longitude (ژمارەی دروست) پێویستن');
     const banks = v('h-banks').split(/[,\s]+/).map(b => b.toUpperCase().replace(/[^A-Z0-9]/g, '')).filter(Boolean);
-    const hub = { name, gov: v('h-gov'), city: v('h-city').trim(), loc: 'City Center', atm: Number(v('h-atm')) || banks.length || 1, status: v('h-st'), lat, lon, link: v('h-link').trim() || `https://www.google.com/maps?q=${lat},${lon}`, banks };
+    const hub = { name, gov: v('h-gov'), city: v('h-city').trim(), loc: v('h-loc') || 'City Center', atm: Number(v('h-atm')) || banks.length || 1, status: v('h-st'), lat, lon, link: v('h-link').trim() || `https://www.google.com/maps?q=${lat},${lon}`, banks };
     editing = null; run(() => write('hubs/' + id, hub), 'هاب پاشەکەوت کرا ✓ — بۆ هەموو بەکارهێنەران دەردەکەوێت');
   };
-  window.admDelHub = (id) => { if (!confirm('دڵنیای لە سڕینەوەی هاب #' + id + '؟')) return; run(() => write('hubs/' + id, BASE_HUBS.some(h => h.id === id) ? { deleted: true } : null), 'هاب سڕایەوە'); };
+  window.admDelHub = (id) => { const h = hubsData.find(x => x.id === id); if (!confirm('دڵنیای لە سڕینەوەی هاب #' + id + (h ? ' — ' + h.name : '') + '؟')) return; run(() => write('hubs/' + id, BASE_HUBS.some(h => h.id === id) ? { deleted: true } : null), 'هاب سڕایەوە'); };
   window.admSaveBank = () => {
     const code = (editing ? editing.data.code : v('b-code')).toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (!code || !v('b-name').trim()) { msg = 'کۆد و ناوی بانک پێویستن'; return admRender(); }
+    if (!code || !v('b-name').trim()) return warn('کۆد و ناوی بانک پێویستن');
     const bank = { name: v('b-name').trim(), phones: lines(v('b-ph')), emails: lines(v('b-em')), map: v('b-map').trim() };
     editing = null; run(() => write('banks/' + code, bank), 'بانک/ژمارە پاشەکەوت کرا ✓ — بۆ هەموو بەکارهێنەران دەردەکەوێت');
   };
-  window.admDelBank = (c) => { if (!confirm('دڵنیای لە سڕینەوەی ' + c + '؟')) return; run(() => write('banks/' + c, BASE_INFO.some(b => b.code === c) ? { deleted: true } : null), 'سڕایەوە'); };
+  window.admDelBank = (c) => { if (!confirm('دڵنیای لە سڕینەوەی ' + c + '؟')) return; run(() => write('banks/' + c, { deleted: true }), 'بانک سڕایەوە و لە هەموو هابەکان شاردرایەوە'); };
 })();
 </script>
 </body>
