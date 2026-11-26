@@ -1047,28 +1047,36 @@
             }
             stopGpsWatch();
             updateGpsUI('connecting');
-            let first = true, rLat = null, rLon = null;
-            gpsWatchId = navigator.geolocation.watchPosition(
-                (pos) => {
-                    lastFix = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-                    if (gpsPaused) return;
-                    userLat = pos.coords.latitude;
-                    userLon = pos.coords.longitude;
-                    if (first) {
-                        first = false; isSortedByNearest = true; rLat = userLat; rLon = userLon;
-                        updateGpsUI(); updateSortUI(); filterHubs();
-                    } else if (haversine(rLat, rLon, userLat, userLon) > 0.1) {
-                        rLat = userLat; rLon = userLon; filterHubs();
-                    }
-                },
-                (err) => {
-                    if (err && err.code === 3 && (userLat !== null || gpsPaused)) return; // timeout: keep the last known position
-                    const wasOnline = userLat !== null;
-                    gpsOffline();
-                    if (!wasOnline) alert(T().gpsErrorAlert);
-                },
-                { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }
-            );
+            // Android: start with a fast network/Wi-Fi fix, then upgrade to precise GPS in the background.
+            // High-accuracy-only often times out indoors, which used to switch GPS off with an error.
+            let first = true, rLat = null, rLon = null, stage = 0;
+            const onPos = (pos) => {
+                lastFix = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+                if (gpsPaused) return;
+                userLat = pos.coords.latitude;
+                userLon = pos.coords.longitude;
+                if (first) {
+                    first = false; isSortedByNearest = true; rLat = userLat; rLon = userLon;
+                    updateGpsUI(); updateSortUI(); filterHubs();
+                    if (stage === 0) { stage = 1; startWatch(true); }
+                } else if (haversine(rLat, rLon, userLat, userLon) > 0.1) {
+                    rLat = userLat; rLon = userLon; filterHubs();
+                }
+            };
+            const onErr = (err) => {
+                if (err && err.code !== 1 && (userLat !== null || gpsPaused)) return; // keep the last known position
+                if (err && err.code !== 1 && stage === 0) { stage = 1; startWatch(true); return; } // network fix failed: try precise GPS
+                const wasOnline = userLat !== null;
+                gpsOffline();
+                if (!wasOnline) alert(T().gpsErrorAlert);
+            };
+            function startWatch(high) {
+                if (gpsWatchId !== null) { try { navigator.geolocation.clearWatch(gpsWatchId); } catch (e) {} gpsWatchId = null; }
+                gpsWatchId = navigator.geolocation.watchPosition(onPos, onErr,
+                    high ? { enableHighAccuracy: true, timeout: 60000, maximumAge: 10000 }
+                         : { enableHighAccuracy: false, timeout: 15000, maximumAge: 120000 });
+            }
+            startWatch(false);
         }
 
         // if the browser/phone location permission is switched off while the app is open
@@ -1712,6 +1720,19 @@
   /* ----- light-weight sync: poll a tiny meta node, download hubs/banks only when its version changed ----- */
   let META = { ver: null, showOnline: false }, lastVer = null;
   async function getJson(path) { const r = await fetch(DB + path, { cache: 'no-store' }); if (!r.ok) { pullErr = r.status; throw 0; } return r.json(); }
+  /* download only the hubs/banks that changed (tiny) instead of the whole list; falls back to a full download */
+  async function pullDelta() {
+    try {
+      const ch = (await getJson(`/changes.json?orderBy=%22%24key%22&startAt=%22${lastVer + 1}%22`)) || {};
+      const paths = [...new Set(Object.values(ch))];
+      if (!paths.length || paths.length > 25 || paths.some(x => !/^(hubs|banks)\/[^\/]+$/.test(x))) return false;
+      const rr = { hubs: { ...(remote.hubs || {}) }, banks: { ...(remote.banks || {}) } };
+      const got = await Promise.all(paths.map(x => getJson('/' + x + '.json')));
+      paths.forEach((x, i) => { const [k, id] = x.split('/'); if (got[i] == null) delete rr[k][id]; else rr[k][id] = got[i]; });
+      remote = rr; lastVer = META.ver; ls.set('cloudv', String(lastVer)); ls.set('cloud1', JSON.stringify(remote));
+      applyCloud(); return true;
+    } catch (e) { return false; }
+  }
   async function pull(force) {
     if (!ON) return;
     try {
@@ -1719,6 +1740,7 @@
       pullErr = 0; META = { ver: meta.ver == null ? 0 : meta.ver, showOnline: !!meta.showOnline };
       setShowOnline(META.showOnline);
       if (!force && lastApplied && META.ver === lastVer) return;
+      if (!force && lastApplied && lastVer > 0 && META.ver > lastVer && await pullDelta()) return;
       const [h, b] = await Promise.all([getJson('/hubs.json'), getJson('/banks.json')]);
       pullErr = 0;
       const nr = { hubs: h || {}, banks: b || {} };
@@ -1807,7 +1829,7 @@
       if (r.status === 404) throw new Error('dbUrl هەڵەیە یان Realtime Database دروست نەکراوە (404)');
       throw new Error('نەتوانرا پاشەکەوت بکرێت (' + r.status + (m ? ': ' + m : '') + ')');
     }
-    if (!noBump) { try { await fetch(`${DB}/meta/ver.json?auth=${t}`, { method: 'PUT', body: String(Date.now()) }); } catch (e) {} }
+    if (!noBump) { try { const ver = Date.now(), p = /^(hubs|banks)\/[^\/]+$/.test(path) ? path : '*'; await fetch(`${DB}/changes/${ver}.json?auth=${t}`, { method: 'PUT', body: JSON.stringify(p) }); await fetch(`${DB}/meta/ver.json?auth=${t}`, { method: 'PUT', body: String(ver) }); } catch (e) {} }
     await pull(true);
   }
 
