@@ -259,9 +259,6 @@
         .hub-actions { display:flex; gap:.5rem; } .hub-actions > * { flex:1; }
         .btn-ghost { display:flex; align-items:center; justify-content:center; gap:.45rem; min-height:44px; border:1px solid var(--line); border-radius:10px; color:var(--text); font-size:14px; font-weight:600; background:transparent; }
         .btn-ghost:hover { background:color-mix(in srgb,var(--text) 7%,transparent); }
-        #view-tabs { display:inline-flex; padding:3px; border-radius:10px; background:var(--card); border:1px solid var(--line); }
-        #view-tabs button { font-size:12.5px; font-weight:600; padding:.3rem .95rem; border-radius:8px; color:var(--muted); }
-        #view-tabs button[aria-selected="true"] { background:var(--brand); color:#fff; }
         #map { position:relative; z-index:0; height:calc(100dvh - 270px); min-height:380px; border-radius:14px; border:1px solid var(--line); overflow:hidden; font-family:inherit; }
         .map-note { position:absolute; z-index:1000; inset-inline:10px; bottom:34px; padding:.55rem .75rem; border-radius:10px; background:var(--card); border:1px solid var(--line); color:var(--text); font-size:12.5px; line-height:1.5; text-align:center; }
         #map { background:#232224; }
@@ -304,6 +301,20 @@
         html[data-theme="light"] .text-amber-400 { color:#a16207; }
         html[data-theme="light"] .text-indigo-300 { color:#2f6b35; }
         html[data-theme="light"] .shadow-lg, html[data-theme="light"] .shadow-xl { box-shadow:0 1px 2px rgba(10,22,38,.07); }
+
+        /* ===== bottom glass tab bar ===== */
+        .tabbar { position:fixed; z-index:1250; left:0; right:0; margin:0 auto; bottom:max(12px,env(safe-area-inset-bottom)); width:min(calc(100% - 28px),400px); height:64px; padding:6px; display:flex; gap:4px; border-radius:999px; background:rgba(48,47,50,.58); -webkit-backdrop-filter:blur(24px) saturate(1.7); backdrop-filter:blur(24px) saturate(1.7); border:1px solid rgba(255,255,255,.13); box-shadow:0 12px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.14),inset 0 -1px 0 rgba(0,0,0,.25); transition:opacity .25s,transform .25s; --tb-ink:#d9d7da; --tb-on-bg:#141315; --tb-on-ink:#fff; }
+        html[data-theme="light"] .tabbar { background:rgba(255,255,255,.62); border-color:rgba(0,0,0,.08); box-shadow:0 12px 30px rgba(40,30,20,.22),inset 0 1px 0 rgba(255,255,255,.9); --tb-ink:#4a474b; --tb-on-bg:#262527; }
+        .tb { flex:1; min-width:0; border:0; background:transparent; color:var(--tb-ink); border-radius:999px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-family:inherit; text-decoration:none; font-size:11.5px; font-weight:600; line-height:1.2; cursor:pointer; transition:background .25s,color .25s; }
+        .tb span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-inline:4px; }
+        .tb svg { width:25px; height:25px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+        .tb[aria-current="page"] { background:var(--tb-on-bg); color:var(--tb-on-ink); }
+        .tb[aria-current="page"] .fl { fill:currentColor; }
+        .tb[aria-current="page"] .hole { fill:var(--tb-on-bg); }
+        body:has(#splash) .tabbar, body:has(#gov-modal.flex) .tabbar, body:has(#bank-modal.flex) .tabbar, body:has(#share-modal.open) .tabbar { opacity:0; pointer-events:none; transform:translateY(24px); }
+        #install-btn { bottom:calc(5.75rem + env(safe-area-inset-bottom)) !important; }
+        .spage-body { padding-bottom:calc(6.5rem + env(safe-area-inset-bottom)); }
+        @media (min-width:900px) { body { padding-bottom:6.5rem; } }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen selection:bg-indigo-500 selection:text-white">
@@ -313,10 +324,6 @@
             <div class="flex items-center gap-2 min-w-0">
                 <img data-logo src="logo-v2.png" alt="MyAccount" class="h-[4.5rem] w-auto shrink-0">
                 <div class="min-w-0"><h1 id="app-title" class="app-heading font-bold text-sm leading-tight tracking-wide">MyAccount ATM Hubs</h1><div id="online-badge" class="hidden"><i></i><b>0</b><span></span></div></div>
-            </div>
-            <div class="flex flex-col items-end gap-1.5 shrink-0">
-                <button onclick="openSettings()" id="settings-btn" aria-label="Settings" class="bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-slate-200 text-xl w-9 h-9 rounded-xl transition flex items-center justify-center shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-[1em] h-[1em] shrink-0" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-                <a id="web-btn" href="https://myaccount.gov.krd/" target="_blank" rel="noopener noreferrer" class="bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-slate-200 rounded-xl transition inline-flex items-center gap-1.5 px-2.5 h-8 no-underline shadow-sm" style="font-size:11px;font-weight:500;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0 text-indigo-400" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg><span id="web-label" class="whitespace-nowrap">وێبسایتی هەژماری من</span></a>
             </div>
         </div>
     <div class="flag-bar" aria-hidden="true"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><polygon points="50.0,0.0 54.6,19.3 64.7,2.2 63.5,22.1 78.2,8.7 71.1,27.3 89.1,18.8 76.8,34.5 96.5,31.7 80.2,43.1 99.9,46.3 80.9,52.3 98.7,61.1 78.9,61.3 93.3,75.0 74.2,69.3 84.0,86.7 67.5,75.6 71.7,95.0 59.1,79.6 57.5,99.4 50.0,81.0 42.5,99.4 40.9,79.6 28.3,95.0 32.5,75.6 16.0,86.7 25.8,69.3 6.7,75.0 21.1,61.3 1.3,61.1 19.1,52.3 0.1,46.3 19.8,43.1 3.5,31.7 23.2,34.5 10.9,18.8 28.9,27.3 21.8,8.7 36.5,22.1 35.3,2.2 45.4,19.3" fill="#fdc82f"/></svg></div>
@@ -348,15 +355,19 @@
 
         <div class="flex items-center justify-between gap-3">
             <p id="results-meta" aria-live="polite"></p>
-            <div id="view-tabs" role="tablist">
-                <button id="tab-list" role="tab" aria-selected="true" onclick="setView('list')"></button>
-                <button id="tab-map" role="tab" aria-selected="false" onclick="setView('map')"></button>
-            </div>
         </div>
         <div id="net-note" class="hidden"></div>
         <div id="hubs-container" class="space-y-2"></div>
         <div id="map-wrap" class="hidden"><div id="map"></div></div>
     </main>
+
+    <!-- Bottom tab bar: Home / Map / Settings -->
+    <nav id="tabbar" class="tabbar" aria-label="Main">
+        <button type="button" class="tb" data-tab="home" onclick="tabGo('home')"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="fl" d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span id="tb-home"></span></button>
+        <a class="tb" href="https://myaccount.gov.krd/" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5a14.5 14.5 0 0 1 3.8 9.5 14.5 14.5 0 0 1-3.8 9.5 14.5 14.5 0 0 1-3.8-9.5A14.5 14.5 0 0 1 12 2.5z"/></svg><span id="tb-web"></span></a>
+        <button type="button" class="tb" id="tb-map-btn" data-tab="map" onclick="tabGo('map')"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="fl" fill-rule="evenodd" d="M12 21.5C12 21.5 5 15.5 5 10a7 7 0 0 1 14 0c0 5.5-7 11.5-7 11.5zM12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg><span id="tb-map"></span></button>
+        <button type="button" class="tb" data-tab="settings" onclick="tabGo('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="fl" d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle class="hole" cx="12" cy="12" r="3"/></svg><span id="tb-settings"></span></button>
+    </nav>
 
     <!-- Settings page -->
     <div id="settings-page" class="spage" role="dialog" aria-modal="true" aria-labelledby="settings-title" aria-hidden="true">
@@ -979,8 +990,8 @@
             renderBankInfo(); $('settings-title').textContent = t.settings; $('settings-page').querySelector('.spage-back').setAttribute('aria-label', t.settings);
             $('search-input').placeholder = t.searchPlaceholder;
             $('install-text').textContent = t.install;
-            $('tab-list').textContent = t.listTab; $('tab-map').textContent = t.mapTab;
-            renderGovList(); updateGovUI(); renderBankList(); updateBankUI(); $('bank-btn').textContent = t.banksTitle; $('web-label').textContent = t.webTitle;
+            renderTabbarLabels();
+            renderGovList(); updateGovUI(); renderBankList(); updateBankUI(); $('bank-btn').textContent = t.banksTitle;
             // search icon + input padding side
             const icon = $('search-icon'), input = $('search-input');
             icon.classList.toggle('right-3.5', rtl);
@@ -1299,7 +1310,7 @@
             updateSettingsUI();
             const pg = $('settings-page');
             pg.classList.add('open'); pg.setAttribute('aria-hidden', 'false');
-            document.body.style.overflow = 'hidden';
+            document.body.style.overflow = 'hidden'; syncTabbar();
             try { history.pushState({ settings: 1 }, ''); } catch (e) {}
         }
         function hideSettings() {
@@ -1307,7 +1318,7 @@
             settingsOpen = false;
             const pg = $('settings-page');
             pg.classList.remove('open'); pg.setAttribute('aria-hidden', 'true');
-            document.body.style.overflow = '';
+            document.body.style.overflow = ''; syncTabbar();
         }
         function closeSettings() {
             if (!settingsOpen) return;
@@ -1539,7 +1550,7 @@
             return leafletP;
         }
         setTimeout(ensureLeaflet, 3000);
-        document.addEventListener('DOMContentLoaded', () => { const tm = $('tab-map'); if (tm) tm.addEventListener('pointerdown', ensureLeaflet, { passive: true }); });
+        document.addEventListener('DOMContentLoaded', () => { const tm = $('tb-map-btn'); if (tm) tm.addEventListener('pointerdown', ensureLeaflet, { passive: true }); });
         function initMap() {
             if (map) return;
             if (typeof L === 'undefined') { $('map').innerHTML = `<p class="p-8 text-center text-slate-400 text-sm">${T().mapOffline}</p>`; return; }
@@ -1589,12 +1600,40 @@
             viewMode = v;
             $('hubs-container').classList.toggle('hidden', v === 'map');
             $('map-wrap').classList.toggle('hidden', v !== 'map');
-            $('tab-list').setAttribute('aria-selected', v === 'list');
-            $('tab-map').setAttribute('aria-selected', v === 'map');
+            syncTabbar();
             if (v === 'map') { ensureLeaflet().then(() => { if (viewMode !== 'map') return; initMap(); if (map) { map.invalidateSize(); drawMap(focusId); } }); }
             else if (prevView === 'map') { window.scrollTo(0, listScrollY); requestAnimationFrame(() => window.scrollTo(0, listScrollY)); }
         }
         function showOnMap(id) { setView('map', id); window.scrollTo({ top: 0 }); }
+
+        // ===== Bottom tab bar =====
+        const TB_WEB = { ku: 'وێبسایت', bd: 'وێبسایت', ar: 'الموقع', en: 'Website' };
+        const TB_HOME = { ku: 'سەرەکی', bd: 'سەرەکی', ar: 'الرئيسية', en: 'Home' };
+        function renderTabbarLabels() {
+            const t = T();
+            $('tb-home').textContent = TB_HOME[currentLang] || TB_HOME.en;
+            $('tb-map').textContent = t.mapTab;
+            $('tb-web').textContent = TB_WEB[currentLang] || TB_WEB.en;
+            $('tb-settings').textContent = t.settings;
+        }
+        function syncTabbar() {
+            try {
+                const active = settingsOpen ? 'settings' : (viewMode === 'map' ? 'map' : 'home');
+                document.querySelectorAll('#tabbar .tb').forEach((b) => {
+                    if (b.dataset.tab === active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+                });
+            } catch (e) {}
+        }
+        function tabGo(k) {
+            if (k === 'settings') { if (bankInfoOpen) closeBankInfo(); else openSettings(); return; }
+            const st = history.state || {};
+            try { if (st.bankinfo) history.go(-2); else if (st.settings) history.go(-1); } catch (e) {}
+            hideBankInfo(); hideSettings();
+            const v = k === 'map' ? 'map' : 'list';
+            if (viewMode === v) window.scrollTo({ top: 0, behavior: 'smooth' });
+            else { setView(v); if (v === 'map') window.scrollTo({ top: 0 }); }
+            syncTabbar();
+        }
 
         // ===== PWA install =====
         window.addEventListener('beforeinstallprompt', (e) => {
